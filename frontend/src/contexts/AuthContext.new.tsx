@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { authOptimizer } from '../utils/authOptimizer';
 import { sessionRecovery } from '../utils/sessionRecovery';
 import { sessionPersistenceManager } from '../utils/SessionPersistenceManager';
+import { SecureAPI } from '../lib/secureApi';
 import { extractTenantFromSession } from '../utils/jwtUtils';
 
 // Global logout flag to prevent session recovery during logout
@@ -43,6 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Helper function to enrich user object with tenant_id from JWT claims and metadata  
   const enrichUserWithTenant = useCallback((session: Session): EnhancedUser => {
+    SecureAPI.setAccessToken(session.access_token);
     const enhancedUser = session.user as EnhancedUser;
 
     // Extract tenant_id with priority: JWT claims > app_metadata > user_metadata
@@ -219,6 +221,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           authOptimizer.storeSession(session);
         } else {
           console.log('🔍 [AuthContext] Session is NULL -> Logging out');
+          SecureAPI.setAccessToken(null);
           setUser(null);
           setIsAuthenticated(false);
           authOptimizer.clearSession();
@@ -266,6 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
+      SecureAPI.setAccessToken(null);
       console.log('[AuthContext] Starting logout process');
 
       // 0. SET LOGOUT FLAG FIRST - prevents ALL session recovery attempts

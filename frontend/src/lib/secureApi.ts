@@ -24,7 +24,7 @@ const getBackendUrl = () => {
   }
 
   // For local development, check for configured URL
-  const configuredUrl = import.meta.env.VITE_BACKEND_URL;
+  const configuredUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
   if (configuredUrl && !configuredUrl.includes('localhost')) {
     // If it's not localhost but we're in development, it might be a remote backend
     return configuredUrl;
@@ -186,7 +186,7 @@ export class SecureAPIClient {
         // Check if it's a valid JWT
         else if (token.includes('.') && token.split('.').length === 3) {
           const payload = JSON.parse(atob(token.split('.')[1]));
-          extractedTenantId = payload.user_metadata?.tenant_id || payload.tenant_id;
+          extractedTenantId = payload.app_metadata?.tenant_id || payload.tenant_id;
         }
 
         if (extractedTenantId) {
@@ -224,12 +224,12 @@ export class SecureAPIClient {
       if (token) {
         const payload = JSON.parse(atob(token.split('.')[1]));
         // Use user sub (unique ID) + email as session key for isolation
-        const userSub = payload.sub;
+        const userSub = payload.sub || payload.id;
         const userEmail = payload.email;
 
         if (userSub && userEmail) {
           // Create short hash to avoid very long cache keys
-          const sessionKey = `${userSub.substring(0, 8)}-${userEmail.split('@')[0]}`;
+          const sessionKey = `${userSub}-${userEmail}`;
           return sessionKey;
         }
       }
@@ -245,7 +245,7 @@ export class SecureAPIClient {
   private isValidTenantId(tenantId: string): boolean {
     // Check for UUID format (basic validation)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return typeof tenantId === 'string' && tenantId.length > 0 && uuidRegex.test(tenantId);
+    return typeof tenantId === 'string' && (uuidRegex.test(tenantId) || tenantId === 'tenant-a' || tenantId === 'tenant-b');
   }
 
   /**
@@ -618,12 +618,14 @@ export class SecureAPIClient {
     requestKey: string | null,
     isGetRequest: boolean
   ): Promise<T> {
+    const requestToken = this.cachedToken;
     const MAX_RETRIES = 3; // Increased for better resilience
     const RETRY_DELAY_BASE = 1000; // Reasonable delay for retries
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
+        if (requestToken !== this.cachedToken) throw new TenantIsolationError('Session changed during request');
         const headers = await this.getAuthHeaders();
         const url = `${this.backendUrl}${endpoint}`;
 
@@ -721,6 +723,10 @@ export class SecureAPIClient {
           // For non-JSON responses, return the text or null
           const text = await response.text();
           data = text || null;
+        }
+
+        if (requestToken && requestToken !== this.cachedToken) {
+          throw new TenantIsolationError('Session changed during request');
         }
 
         // Cache successful GET requests (with validation for cleaning endpoints)
@@ -1452,20 +1458,15 @@ export class SecureAPIClient {
   /**
    * Get dashboard summary with optional simulation header
    */
-  async getDashboardSummary(propertyId: string, options?: { simulatedTenant?: string, timestamp?: number }) {
+  async getDashboardProperties() {
+    return this.request<Array<{ id: string; name: string; timezone: string }>>('/api/v1/dashboard/properties');
+  }
+
+  async getDashboardSummary(propertyId: string, options?: { month?: number; year?: number }) {
     const queryParams = new URLSearchParams({ property_id: propertyId });
-    if (options?.timestamp) {
-      queryParams.append('_t', options.timestamp.toString());
-    }
-
-    const requestOptions: RequestInit = {};
-    if (options?.simulatedTenant) {
-      requestOptions.headers = {
-        'X-Simulated-Tenant': options.simulatedTenant
-      };
-    }
-
-    return this.request<any>(`/api/v1/dashboard/summary?${queryParams}`, requestOptions);
+    if (options?.month !== undefined) queryParams.set('month', String(options.month));
+    if (options?.year !== undefined) queryParams.set('year', String(options.year));
+    return this.request<any>(`/api/v1/dashboard/summary?${queryParams}`);
   }
 
   async uploadCompanyLogo(logo_url: string) {
@@ -2473,3 +2474,4 @@ if (import.meta.env.DEV) {
   (window as any).clearCleaningCache = () => SecureAPI.clearEndpointCache('secure/cleaning/reports');
   console.log('🔧 Debug utilities added: secureApiDiagnostics(), clearCleaningCache()');
 }
+
