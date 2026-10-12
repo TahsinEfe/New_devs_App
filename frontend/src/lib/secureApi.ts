@@ -12,7 +12,14 @@
 import { supabase } from './supabase';
 import { decodeJWTPayload } from '../utils/jwtUtils';
 import { sessionManager } from '../utils/sessionManager';
-import { withRetry, handleApiError, classifyError } from '../utils/apiErrorHandler';
+
+type AccessTokenSession = {
+  access_token: string;
+};
+
+type QueryableClient = {
+  from: (table: string) => unknown;
+};
 
 // Get backend URL with fallback for misconfigured production environments
 const getBackendUrl = () => {
@@ -74,8 +81,16 @@ export class SecureAPIClient {
    */
   private interceptDirectQueries() {
     if (import.meta.env.DEV) {
+      // The local auth client intentionally exposes no database query API. Keep the
+      // interceptor compatible with a real Supabase client without pretending that
+      // LocalAuthClient has a `.from()` method.
+      const queryClient = supabase as unknown as Partial<QueryableClient>;
+      if (typeof queryClient.from !== 'function') {
+        return;
+      }
+
       const ENFORCE = (import.meta.env as any).VITE_ENFORCE_SECURE_API === 'true';
-      const originalFrom = supabase.from;
+      const originalFrom = queryClient.from.bind(supabase);
       // Temporary dev allowlist for legacy direct queries while migrating to SecureAPI
       const DEV_ALLOWLIST = new Set([
         'user_permissions',
@@ -85,7 +100,7 @@ export class SecureAPIClient {
         'landlord_details'
       ]);
 
-      supabase.from = (table: string) => {
+      queryClient.from = (table: string) => {
         const stack = new Error().stack || '';
         const violation = `SECURITY VIOLATION: Direct Supabase query to table '${table}'`;
 
@@ -96,7 +111,7 @@ export class SecureAPIClient {
             // Record violation for later review, but don't block
             this.securityViolations.push(violation + ' (allowed in DEV)');
           }
-          return originalFrom.call(supabase, table);
+          return originalFrom(table);
         }
 
         // Strict enforcement in DEV when VITE_ENFORCE_SECURE_API=true
@@ -244,7 +259,8 @@ export class SecureAPIClient {
    * Validate tenant ID format for security
    */
   private isValidTenantId(tenantId: string): boolean {
-    // Check for UUID format (basic validation)
+    // Production tenant IDs are UUIDs; the local challenge data uses stable slugs
+    // such as "tenant-a". Both are safe cache namespaces after validation.
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     return typeof tenantId === 'string' && (uuidRegex.test(tenantId) || tenantId === 'tenant-a' || tenantId === 'tenant-b');
   }
@@ -265,7 +281,7 @@ export class SecureAPIClient {
     let cleared = 0;
     const keysToDelete: string[] = [];
 
-    for (const [key, value] of this.requestCache.entries()) {
+    for (const key of this.requestCache.keys()) {
       if (key.includes(endpointPattern)) {
         keysToDelete.push(key);
         cleared++;
@@ -278,7 +294,7 @@ export class SecureAPIClient {
 
     // Also clear pending requests
     const pendingKeysToDelete: string[] = [];
-    for (const [key, promise] of this.pendingRequests.entries()) {
+    for (const key of this.pendingRequests.keys()) {
       if (key.includes(endpointPattern)) {
         pendingKeysToDelete.push(key);
       }
@@ -406,10 +422,6 @@ export class SecureAPIClient {
       return true; // Cache all other endpoints normally
     }
 
-    // Check if result looks valid for cleaning data
-    const items = data?.items || data?.data || [];
-    const total = data?.total || 0;
-
     // Always cache properly structured responses, even if empty
     // Empty results can be legitimate for users without tenant access or specific date ranges
     if (data && typeof data === 'object' && (data.hasOwnProperty('items') || data.hasOwnProperty('data') || data.hasOwnProperty('total'))) {
@@ -438,10 +450,6 @@ export class SecureAPIClient {
     // during rapid tab switching. The 3-second invalidation was causing cache thrashing.
     const CLEANING_CACHE_TTL = 30000; // 30 seconds instead of 3 seconds
 
-    // For cleaning endpoints, use extended cache time but validate content
-    const items = cachedData?.items || cachedData?.data || [];
-    const total = cachedData?.total || 0;
-
     // Primary validation: check cache age with more reasonable timeout
     if (cacheAge > CLEANING_CACHE_TTL) {
       return false;
@@ -467,7 +475,7 @@ export class SecureAPIClient {
   /**
    * Wait for a valid Supabase session (with timeout) so API calls don't race login.
    */
-  private async waitForSession(timeoutMs: number = 7000): Promise<import('@supabase/supabase-js').Session | null> {
+  private async waitForSession(timeoutMs: number = 7000): Promise<AccessTokenSession | null> {
     // Helper to read token from Supabase storage as last resort
     const getTokenFromStorage = (): string | null => {
       try {
@@ -496,32 +504,31 @@ export class SecureAPIClient {
     if (initial.data.session?.access_token) return initial.data.session;
     const storageToken = getTokenFromStorage();
     if (storageToken) {
-      // Construct a minimal session object shape with access_token
-      return { access_token: storageToken } as any;
+      return { access_token: storageToken };
     }
 
     // Listen + poll concurrently
-    let unsubscribe: (() => void) | null = null;
+    const subscriptionRef: { unsubscribe?: () => void } = {};
     let resolved = false;
-    const sessionPromise = new Promise<import('@supabase/supabase-js').Session | null>((resolve) => {
+    const sessionPromise = new Promise<AccessTokenSession | null>((resolve) => {
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         if (!resolved && session?.access_token) {
           resolved = true;
-          if (unsubscribe) unsubscribe();
+          subscriptionRef.unsubscribe?.();
           resolve(session);
         }
       });
-      unsubscribe = () => data.subscription.unsubscribe();
+      subscriptionRef.unsubscribe = () => data.subscription.unsubscribe();
     });
 
-    const pollingPromise = new Promise<import('@supabase/supabase-js').Session | null>(async (resolve) => {
+    const pollingPromise = new Promise<AccessTokenSession | null>(async (resolve) => {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
         const token = await nowHasToken();
         if (token) {
           resolved = true;
-          if (unsubscribe) unsubscribe();
-          resolve({ access_token: token } as any);
+          subscriptionRef.unsubscribe?.();
+          resolve({ access_token: token });
           return;
         }
         await new Promise(r => setTimeout(r, 200));
@@ -531,7 +538,7 @@ export class SecureAPIClient {
 
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
     const result = await Promise.race([sessionPromise, pollingPromise, timeoutPromise]);
-    if (unsubscribe) unsubscribe();
+    subscriptionRef.unsubscribe?.();
     return result;
   }
 
@@ -1457,7 +1464,7 @@ export class SecureAPIClient {
 
   // ============= DASHBOARD API =============
   /**
-   * Get dashboard summary with optional simulation header
+   * Get a monthly dashboard summary. Tenant context always comes from auth.
    */
   async getDashboardProperties() {
     return this.request<Array<{ id: string; name: string; timezone: string }>>('/api/v1/dashboard/properties');

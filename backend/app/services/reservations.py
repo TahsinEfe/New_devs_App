@@ -60,12 +60,10 @@ async def _calculate(session, property_id, tenant_id, month, year):
         GROUP BY currency
     """), params)
     rows = result.fetchall()
-    # No FX source is supplied. Never add unlike currencies into a fake USD total.
     if len(rows) > 1:
         raise ValueError("Multiple currencies cannot be combined without exchange rates")
     row = rows[0] if rows else None
     total = Decimal(str(row.total_revenue)) if row else Decimal("0")
-    # Sum NUMERIC sub-cent values first; round once at the reporting boundary.
     total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return {
         "property_id": property_id,
@@ -88,4 +86,3 @@ async def calculate_total_revenue(
     await db_pool.initialize()
     async with db_pool.get_session() as session:
         return await _calculate(session, property_id, tenant_id, month, year)
-

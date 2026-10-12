@@ -11,7 +11,7 @@ const Dashboard: React.FC = () => {
   const [selectedProperty, setSelectedProperty] = useState("");
   const [period, setPeriod] = useState("monthly");
   const [month, setMonth] = useState(3);
-  const [year, setYear] = useState(2024); // Supplied sample data is March 2024.
+  const [year, setYear] = useState(2024);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -85,4 +85,3 @@ const Dashboard: React.FC = () => {
 };
 
 export default Dashboard;
-

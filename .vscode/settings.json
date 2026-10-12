@@ -17,5 +17,9 @@
   "python.analysis.typeCheckingMode": "basic", // Ensures type checking is enabled
   "python.analysis.autoImportCompletions": true, // Helps with auto-imports
   "git.ignoreLimitWarning": true,
-  "python.defaultInterpreterPath": "backend/.venv/bin/python"
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend"
+  ],
+  "python.terminal.activateEnvironment": true
 }

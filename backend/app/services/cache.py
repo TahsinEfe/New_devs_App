@@ -19,7 +19,6 @@ async def get_revenue_summary(
 ) -> Dict[str, Any]:
     if not tenant_id:
         raise ValueError("Tenant is required")
-    # New namespace ignores legacy leaked/incorrect entries. JSON avoids collisions.
     cache_key = "revenue:v2:" + json.dumps(
         [tenant_id, property_id, year, month], separators=(",", ":")
     )
@@ -41,4 +40,3 @@ async def get_revenue_summary(
     except RedisError:
         logger.warning("Revenue cache write failed; returning database result")
     return result
-

@@ -36,7 +36,6 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({
     }).finally(() => {
       if (active) setLoading(false);
     });
-    // Ignore responses belonging to a previous property, period, or account.
     return () => { active = false; };
   }, [propertyId, month, year, user?.id, user?.tenant_id]);
 
@@ -44,7 +43,6 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({
   if (error) return <div role="alert" className="p-4 text-red-500 bg-red-50 rounded-lg">{error}</div>;
   if (!data) return null;
 
-  // Backend sends an already rounded decimal string. Do not re-round using JS floats.
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
       {showRaw && <pre className="text-xs overflow-auto">{JSON.stringify(data, null, 2)}</pre>}
@@ -57,4 +55,3 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({
     </div>
   );
 };
-
