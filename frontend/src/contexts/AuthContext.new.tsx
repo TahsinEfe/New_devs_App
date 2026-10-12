@@ -48,7 +48,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const enhancedUser = session.user as EnhancedUser;
 
     // Extract tenant_id with priority: JWT claims > app_metadata > user_metadata
-    let tenant_id: string | null = null;
+    let tenant_id: string | null = enhancedUser.tenant_id || null;
     let source = 'none';
 
     // 1. First try JWT claims (added by custom_access_token_hook)
@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const enhancedUser = user as EnhancedUser;
 
     // Extract tenant_id from metadata only (no JWT claims available)
-    let tenant_id: string | null = null;
+    let tenant_id: string | null = enhancedUser.tenant_id || null;
     let source = 'none';
 
     // Try app_metadata first

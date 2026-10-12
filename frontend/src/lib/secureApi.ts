@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase';
+import { decodeJWTPayload } from '../utils/jwtUtils';
 import { sessionManager } from '../utils/sessionManager';
 import { withRetry, handleApiError, classifyError } from '../utils/apiErrorHandler';
 
@@ -185,8 +186,8 @@ export class SecureAPIClient {
         }
         // Check if it's a valid JWT
         else if (token.includes('.') && token.split('.').length === 3) {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          extractedTenantId = payload.app_metadata?.tenant_id || payload.tenant_id;
+          const payload = decodeJWTPayload(token);
+          extractedTenantId = payload?.app_metadata?.tenant_id || payload?.tenant_id;
         }
 
         if (extractedTenantId) {
@@ -222,10 +223,10 @@ export class SecureAPIClient {
     try {
       const token = this.cachedToken;
       if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]));
+        const payload = decodeJWTPayload(token);
         // Use user sub (unique ID) + email as session key for isolation
-        const userSub = payload.sub || payload.id;
-        const userEmail = payload.email;
+        const userSub = payload?.sub || payload?.id;
+        const userEmail = payload?.email;
 
         if (userSub && userEmail) {
           // Create short hash to avoid very long cache keys

@@ -127,6 +127,10 @@ async def lifespan(app: FastAPI):
     await async_processor.shutdown()
     logger.info("Async processor shutdown completed")
 
+    # Close the shared revenue database pool created on the first dashboard request.
+    from .core.database_pool import db_pool
+    await db_pool.close()
+
     # Close connection pool
     try:
         from .core.supabase_connection_pool import supabase_pool
@@ -476,3 +480,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

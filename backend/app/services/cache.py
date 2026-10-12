@@ -27,7 +27,9 @@ async def get_revenue_summary(
         cached = await redis_client.get(cache_key)
         if cached:
             result = json.loads(cached)
-            if result.get("tenant_id") == tenant_id and result.get("property_id") == property_id:
+            if (result.get("tenant_id") == tenant_id
+                    and result.get("property_id") == property_id
+                    and all(field in result for field in ("total", "currency", "count"))):
                 return result
     except (RedisError, ValueError, TypeError, AttributeError):
         logger.warning("Revenue cache unavailable or invalid; reading database")
